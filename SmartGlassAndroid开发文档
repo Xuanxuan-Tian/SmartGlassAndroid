@@ -1,0 +1,441 @@
+一、前言
+SmartGlassAndroid是基于WebRTC开源项目nubotest进行重构的，作为基于智能眼镜视频传输系统的Android客户端部分，为用户提供支持640P、720P、1080P等不同视频格式的视频、语音采集，并通过接入智慧协同路由器进行视频传输及语音通话，解决高速移动、运营商网络覆盖条件差等弱网环境下即时通信问题。该系统支持视频、语音延时小（0~2秒）、故障标记、文字消息、二维码设置、视频带宽自适应等功能，为远程视频监控、应急救援指挥等应用环境提供完整的解决方案。
+本文档主要面向项目开发人员，开发者应具备扎实的java基础，熟悉Android系统开发流程，了解WebRTC实时通信协议，能熟练使用gradle工具构建项目，熟练使用Android studio开发环境，熟悉kurento&nubomedia项目架构。
+二、SmartGlassAndroid工程架构
+主要类文件及布局文件
+NewPeerVideoActivity
+NewPeerVideoActivity对应的布局文件是activity_peervideo.xml，是SmartGlassAndroid实现视频传输等功能最主要的Activity。实现各项功能的主要方法涉及：
+(1)kurentoRoomAPI.connectWebSocket();连接WebSocket
+	(2)kurentoRoomAPI.sendJoinRoom();加入房间
+	(3)kurentoRoomAPI.sendPublishVideo();推送视频
+(4)kurentoRoomAPI.sendReceiveVideoFrom();接收语音（或视频）
+(5)onRoomResponse();接收服务器文字消息、标记指令等
+MainActivity
+MainActivity对应的布局文件是activity_mian.xml，SmartGlassAndroid启动的第一个activity，绑定了ViewPager控件，配合FirstFragment和SecondFragment实现左右滑动、双击等手势动作，实现对客户端的操作。
+FirstFragment
+FirstFragment对应的布局文件是fragment_first.xml，主要功能是实现双击进入直播（NewPeerVideoActivity）界面，滑动进入设置界面，具体实现请参考源代码及注释。
+SecondFragment
+SecondFragment对应的布局文件是fragment_second.xml，主要功能是实现双击进去功能设置（SettingsActivity）界面，滑动回退到直播界面，具体实现请参考源代码及注释。
+SettingsActivity
+	SettingsActivity对应的布局文件是activity_settings.xml，主要功能是显示当前从设置文件读取的设置信息：用户名、WiFi名及WiFi密码、分辨率、带宽、服务器地址等；在本界面双击后可以进行扫描二维码设置，配合网页端进行相关设置。
+	
+
+
+WifiAutoConnectManager
+WiFiAutoConnectManager主要功能是实现对SettingsActivity界面传入的WiFi SSID和WiFi password进行WiFi设置。具体实现请参考源代码及注释
+SVDraw
+	SVDraw类由NewPeerVideoActivity进行实例化并调用，实现根据指定的矩形对角线坐标进行绘图，从而实现故障标记功能。
+KeepAlive
+	KeepAlive类由NewPeerVideoActivity进行实例化并调用，实现客户端在与服务器连接后进行ping包保活检测，在断网时进行网络恢复检测从而实现异常退出时用户清除、断网检测及重启功能。
+Ping
+	定义的在KeepAlive类中调用的实现ping服务器的一个方法。
+MyApplication
+	获取客户端上下文的一个类，由KeepAlive类调用。需要注意的是要使MyApplication生效必须在AndroidManifest.xml中添加
+	android:name="com.example.administrator.smartglass.MyApplication"
+三、SmartGlassAndroid更新日志
+实现带宽控制日志
+在NBMWebRTCPeer的第451行新加方法：
+public static String videoCodeBitrate(String sdpDescription, int bandwidth) {
+String sdpDescription1;
+sdpDescription1 = sdpDescription.replace("m=video 1 UDP/TLS/RTP/SAVPF 100\r\n","m=video 1 UDP/TLS/RTP/SAVPF 100\r\nc=IN IP4 0.0.0.0\r\nb=AS:" + bandwidth + "\r\n");
+return sdpDescription1;
+}
+并对processAnswer修改：红色部分为带宽控制代码
+public void processAnswer(SessionDescription remoteAnswer, String connectionId) {
+NBMPeerConnection connection = peerConnectionResourceManager.getConnection(connectionId);
+String sdp1=videoCodeBitrate(remoteAnswer.description,2000);
+final SessionDescription sdp = new SessionDescription(remoteAnswer.type, sdp1);
+if (connection != null) {
+connection.setRemoteDescription(sdp);
+System.out.println(sdp.description+"chazhaotx");
+} else {
+observer.onPeerConnectionError("Connection for id " + connectionId + " cannot be found!");
+}
+}
+视频清晰度改善，上传速率不再受限。
+参考：http://www.2cto.com/kf/201412/358191.html
+
+修改代码，使得可以在前端修改带宽信息
+主要代码：
+修改NBMediaConfigration，在NBMVideoFormat下添加this.totalBandWidth=totalBandWidth;
+修改NBMWebrtcPeer，在 processAnswer方法中调用：String sdp1=videoCodeBitrate(remoteAnswer.description,(int)config.getReceiverVideoFormat().totalBandWidth);
+最后在PeerVideoActivity中设置带宽大小：
+new NBMMediaConfiguration.NBMVideoFormat(1280,720, PixelFormat.RGB_888,17,2000)其中最后一个参数用来设置带宽。
+
+实现网速监控日志
+主要代码：
+在NewPeerVideoActivity中
+private long lastTotalRxBytes = 0;
+private long lastTimeStamp = 0;
+
+private long getTotalRxBytes() {
+return TrafficStats.getUidTxBytes(getApplicationInfo().uid)==TrafficStats.UNSUPPORTED ? 0 :(TrafficStats.getTotalTxBytes()/1024);//转为KB
+}
+TimerTask task = new TimerTask() {
+@Override
+public void run() {
+showNetSpeed();
+}
+};
+private void showNetSpeed() {
+long nowTotalRxBytes = getTotalRxBytes();
+long nowTimeStamp = System.currentTimeMillis();
+long speed = ((nowTotalRxBytes - lastTotalRxBytes) * 1000 / (nowTimeStamp - lastTimeStamp));//毫秒转换
+
+System.out.println("wangsu"+speed);
+lastTimeStamp = nowTimeStamp;
+lastTotalRxBytes = nowTotalRxBytes;
+Message msg = m2Handler.obtainMessage();
+msg.what = 100;
+msg.obj = String.valueOf(speed) + " KB/s ";
+m2Handler.sendMessage(msg);//更新界面
+}
+同时，在onCreate（）类中
+m2Handler = new Handler(){
+public void handleMessage(android.os.Message msg){
+switch (msg.what) {
+// case 0 : textView.setText("登出失败"); break;
+case 100 :
+
+wangsu.setText(msg.obj.toString());
+}
+}
+};
+在布局文件activity_video_chat.xml中，添加
+<TextView
+android:id="@+id/wangsu"
+android:text=""
+android:padding="10dp"
+android:textSize="25sp"
+android:textColor="@color/white"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:layout_alignTop="@+id/call_status"
+android:layout_alignParentRight="true"/>
+实现标记功能日志
+调通了画图功能：
+主要参考链接：http://blog.csdn.net/yanzi1225627/article/details/7934710 写得非常好，刚开始没调通是自己没有理解。
+布局修改：在activity_video_chat.xml中，SurfaceViewRender与Surfaceview以帧布局的方式充满父布局，Surfaceview放在顶层并且透明，这样在Surfaceview上面绘图时，就不会覆盖掉SurfaceviewRender预览的视频。
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+xmlns:tools="http://schemas.android.com/tools" android:layout_width="match_parent"
+android:layout_height="match_parent"
+tools:context="com.smartglass.nubotest.PeerVideoActivity">
+<FrameLayout
+android:id="@+id/myFramelayout"
+android:layout_width="match_parent"
+android:layout_height="match_parent"
+android:orientation="vertical" >
+
+<org.webrtc.SurfaceViewRenderer
+android:id="@+id/gl_surface_local"
+android:layout_height="match_parent"
+android:layout_width="match_parent" />
+
+<com.smartglass.nubotest.SVDraw
+android:id="@+id/mDraw"
+android:layout_width="fill_parent"
+android:layout_height="fill_parent"
+/>
+</FrameLayout>
+<ImageButton
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:src="@drawable/ic_action_end_call"
+android:background="@drawable/round_button"
+android:onClick="hangup"
+android:contentDescription="Hang up"
+android:id="@+id/imageButton2"
+android:layout_marginLeft="10dp"
+android:layout_marginRight="10dp"
+android:layout_alignParentTop="true"
+android:layout_alignParentStart="true"
+android:layout_marginStart="12dp" />
+<TextView
+android:id="@+id/call_status"
+android:text="@string/connecting"
+android:padding="10dp"
+android:textSize="25sp"
+android:textColor="@color/white"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:layout_alignParentTop="true"
+android:layout_toEndOf="@+id/imageButton2" />
+<TextView
+android:id="@+id/wangsu"
+android:text=""
+android:padding="10dp"
+android:textSize="25sp"
+android:textColor="@color/white"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:layout_alignParentTop="true"
+android:layout_alignParentEnd="true" />
+<TextView
+android:id="@+id/message_textview1"
+android:text="@string/button_send_message"
+android:layout_height="80dp"
+android:layout_width="100dp"
+android:layout_alignParentEnd="false"
+android:layout_alignBottom="@+id/myFramelayout"
+android:layout_alignRight="@+id/myFramelayout"
+android:layout_alignParentStart="true"
+android:gravity="center"
+android:textSize="@dimen/abc_action_bar_default_height_material" />
+</RelativeLayout>
+绘图类：SVDraw：
+package com.smartglass.nubotest;
+/**
+* Created by Administrator on 2017/5/26.
+*/
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Paint.Style;
+import android.graphics.PixelFormat;
+import android.util.AttributeSet;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.view.View;
+/*定义一个画矩形框的类*/
+public class SVDraw extends SurfaceView implements SurfaceHolder.Callback{
+protected SurfaceHolder sh;
+private int mWidth;
+private int mHeight;
+public SVDraw(Context context, AttributeSet attrs) {
+super(context, attrs);
+// TODO Auto-generated constructor stub
+sh = getHolder();
+sh.addCallback(this);
+sh.setFormat(PixelFormat.TRANSPARENT);
+setZOrderOnTop(true);
+System.out.println("huatu2");
+}
+//surfaceChanged(SurfaceHolder arg0, int arg1, int w, int h)
+public void surfaceChanged(SurfaceHolder arg0, int arg1, int w, int h) {
+System.out.println("huatu3");
+// TODO Auto-generated method stub
+mWidth = w;
+mHeight = h;
+}
+public void surfaceCreated(SurfaceHolder arg0) {
+// TODO Auto-generated method stub
+}
+
+public void surfaceDestroyed(SurfaceHolder arg0) {
+// TODO Auto-generated method stub
+
+}
+void clearDraw()
+{
+Canvas canvas = sh.lockCanvas();
+canvas.drawColor(Color.BLUE);
+sh.unlockCanvasAndPost(canvas);
+}
+public void drawLine(int a,int b,int c,int d)
+{System.out.println("huatu");
+Canvas canvas = sh.lockCanvas();
+canvas.drawColor(Color.TRANSPARENT);
+Paint p = new Paint();
+p.setAntiAlias(true);
+p.setColor(Color.WHITE);
+p.setStyle(Style.STROKE);
+p.setStrokeWidth(3.5f);
+canvas.drawPoint(100.0f, 100.0f, p);
+System.out.println("huatu");
+//canvas.drawLine(50,110, 100, 110, p);
+//canvas.drawCircle(110, 110, 10.0f, p);
+canvas.drawRect(a,b,c,d,p);
+sh.unlockCanvasAndPost(canvas);
+}
+}
+注意：1.在PeerVideoActivity中实例化该类private SVDraw mSVDraw = null;
+2.资源绑定：mSVDraw =(com.smartglass.nubotest.SVDraw)findViewById(com.smartglass.nubotest.R.id.mDraw);
+3.设置可见：mSVDraw.setVisibility(View.VISIBLE);
+4.调用绘图方法绘图：mSVDraw.drawLine(100,100,500,500);
+需要特别注意的是，执行完3后一定不能立即执行4，否则会出现canvas空指针异常！博客的代码没问题，在调试时一定要注意！
+如何清空画布：http://blog.csdn.net/yuanlong_zheng/article/details/7592457
+http://blog.csdn.net/yanzi1225627/article/details/8236309
+实现断网重连日志
+1、开始直播后，开启线程KeepAlive与服务器发送心跳包进行连接检测，
+具体步骤
+（1）在onLocalSdpOfferGenerated( ){ }下
+kurentoRoomAPI.sendTestPing(true,486586386);//触发服务器监听线程
+try{
+Thread.currentThread().sleep(300);
+}catch (Exception e){}
+new Timer().scheduleAtFixedRate(ping,1000,3000);//以3秒的频率向服务器发送心跳包
+（2）在onRoomResponse( )触发客户端心跳包监听进程，每3秒收到服务器心跳包一次，若12秒收不到，则启动来网检测。
+long lastSendTime;
+lastSendTime = System.currentTimeMillis();
+if(keepalivestart){
+ping1= new KeepAlive(lastSendTime);
+ping1.start();
+keepalivestart=false;
+}
+if(requestId==386486586){
+ping1.setLastsentime(lastSendTime);
+System.out.println(TAG+"txxOnRoomResponse()" +response);
+}
+（3）附 KeepAlive代码，若检测到来网，则发送广播告知NewPeerVideoActivity执行相关任务
+class KeepAlive extends Thread {
+boolean running = true;
+boolean unsuccess=true;
+public long lastsentime;
+
+int count=1;
+Context context;
+KeepAlive(long lastsentime) {
+this.lastsentime = lastsentime;
+}
+void setLastsentime(long lastsentime) {
+this.lastsentime = lastsentime;
+}
+public void run() {
+while (running) {
+// System.out.println("panduan"+count++);
+long currenttime = System.currentTimeMillis();
+if (currenttime - lastsentime >12*1000) {
+System.out.println("chongqiAPPduanwang");
+running = false;
+
+while(unsuccess){
+boolean success=ping();
+if (success){
+unsuccess=!unsuccess;
+}
+}
+//若检测到来网，则发送广播告知NewPeerVideoActivity执行相关任务
+try {
+System.out.println("fasongguangbo");
+MyApplication.getContextObject().sendBroadcast(new Intent("finish"));
+System.out.println("fasongguangbo");
+} catch (Exception e) {
+}
+return;
+}
+
+}
+}
+}
+（4）NewPeerVideoActivity收到广播后执行杀死本activity并再在onDestroy（）中发送广播告知FirstFragment重启NewPeerVideoActivity。
+
+NewPeerVideoActivity代码如下
+IntentFilter filter = new IntentFilter();
+filter.addAction("finish");
+registerReceiver(mFinishReceiver, filter);
+/**在onCreate（）中注册广播*/
+private BroadcastReceiver mFinishReceiver = new BroadcastReceiver() {
+@Override
+public void onReceive(Context context, Intent intent) {
+if ("finish".equals(intent.getAction())) {
+Log.e("#########", "I am " + getLocalClassName()
++ ",now finishing myself...");
+try {
+reload();
+// System.out.println("shoudaole");
+} catch (Exception e) {
+}
+}
+}
+};
+/**断网重连方法*/
+public void reload() {
+mSVDraw.clearDraw();
+if (kurentoRoomAPI.isWebSocketConnected()) {
+task.cancel();
+ping.cancel();
+ping1.running=false;
+}
+reStart = !reStart;
+finish();
+}
+/**如果是因断网重连而触发的onDestroy则发送广播重启NewPeerVideoActivity*/
+if(reStart){
+getApplicationContext().sendBroadcast(new Intent("reStartNewPeerVideoActivity"));}
+
+FirstFragment代码如下
+/**注册广播*/
+IntentFilter filter = new IntentFilter();
+filter.addAction("reStartNewPeerVideoActivity");
+getActivity().registerReceiver(mFinishReceiver, filter);
+
+/**收到广播reStartNewPeerVideoActivity，重启NewPeerVideoActivity*/
+private BroadcastReceiver mFinishReceiver = new BroadcastReceiver() {
+@Override
+public void onReceive(Context context, Intent intent) {
+if ("reStartNewPeerVideoActivity".equals(intent.getAction())) {
+// Log.e("#########", "I am " + getLocalClassName()
+// + ",now finishing myself...");
+try{
+Thread.currentThread().sleep(700);
+}catch (Exception e){}
+try {
+intent = new Intent(getActivity(),NewPeerVideoActivity.class);//Fragment中使用intent，第一个参数应该是getActivity
+startActivity(intent);
+System.out.println("shoudaole");
+} catch (Exception e) {
+}
+}
+}
+};
+实现二维码扫描日志
+1.	在build.gradle中添加依赖
+compile 'com.journeyapps:zxing-android-embedded:2.3.0@aar'
+compile 'com.journeyapps:zxing-android-legacy:2.3.0@aar'
+compile 'com.journeyapps:zxing-android-integration:2.3.0@aar'
+compile 'com.google.zxing:core:3.2.0'
+compile 'com.google.android.gms:play-services-appindexing:8.4.0'
+2.	在SettingsActivity中调用
+IntentIntegrator integrator = new IntentIntegrator(SettingsActivity.this);
+integrator.initiateScan();
+3．处理扫描结果
+public void onActivityResult(int requestCode, int resultCode, Intent data) {
+    super.onActivityResult(requestCode, resultCode, data);
+    IntentResult scanResult = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+    if (scanResult != null) {
+        String result = scanResult.getContents();
+        if (result != null) {
+
+            write(result);
+            resultProcess(result);
+            //scan.get(user1);
+            wifiManager = (WifiManager) this.getSystemService(Context.WIFI_SERVICE);
+            WifiAutoConnectManager wifiAutoConnectManager = new WifiAutoConnectManager(wifiManager);
+            wifiAutoConnectManager.connect(scan.get(2),scan.get(3), WIFICIPHER_WPA);
+
+
+            //tvRight.setText("   当前设置："+"\n"+"\n"+"   用户："+scan.get(1) +"\n"+"   WiFi："+scan.get(2) +"\n");
+            //WifiAutoConnectManager wifiAutoConnectManager = new WifiAutoConnectManager(wifiManager);
+            //wifiAutoConnectManager.connect("sinet","bjtungirc",WIFICIPHER_WPA);
+            tvRight.setText("   当前设置："+"\n"+"\n"+"   用户名："+scan.get(1) +"\n"+
+                    "   WiFi名："+scan.get(2) +"\n"+"   分辨率："+scan.get(4) +"\n"+"   服务器："+scan.get(5) +"\n");
+
+
+            Toast.makeText(this,"设置成功", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "设置失败，请重新扫描二维码", Toast.LENGTH_SHORT).show();
+        }
+    }
+}
+实现自动设置WiFi日志
+1.	在AndroidManifest.xml中添加权限
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+<uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+
+2.	在SettingsActivity中实例化WiFiAutoConnectManager并传入参数
+wifiManager = (WifiManager) this.getSystemService(Context.WIFI_SERVICE);
+WifiAutoConnectManager wifiAutoConnectManager = new WifiAutoConnectManager(wifiManager);
+wifiAutoConnectManager.connect(scan.get(2),scan.get(3), WIFICIPHER_WPA);
+3.	主要参考
+http://www.2cto.com/kf/201409/339281.html Wifi连接
+
+
+
+

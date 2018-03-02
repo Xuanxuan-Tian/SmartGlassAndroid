@@ -1,0 +1,89 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools" android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.example.administrator.smartglass.NewPeerVideoActivity">
+    <FrameLayout
+        android:id="@+id/myFramelayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical" >
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/gl_surface_local"
+            android:layout_height="match_parent"
+            android:layout_width="match_parent" />
+
+        <com.example.administrator.smartglass.SVDraw
+            android:id="@+id/mDraw"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/wangsu"
+        android:text=""
+        android:padding="10dp"
+        android:textSize="23sp"
+        android:textColor="@color/white"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="11dp"
+        android:layout_toStartOf="@+id/yonghuming"
+         />
+
+    <TextView
+        android:id="@+id/message_textview1"
+        android:text="@string/button_send_message"
+        android:layout_height="80dp"
+        android:layout_width="100dp"
+        android:layout_alignParentEnd="false"
+        android:layout_alignBottom="@+id/myFramelayout"
+        android:layout_alignRight="@+id/myFramelayout"
+        android:layout_alignParentStart="true"
+        android:gravity="center"
+        android:textSize="30sp"
+        android:textColor="@color/white" />
+
+    <ImageButton
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:src="@drawable/ic_action_end_call"
+        android:background="@drawable/round_button"
+        android:onClick="hangup"
+        android:contentDescription="Hang up"
+        android:id="@+id/imageButton2"
+        android:layout_marginLeft="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginTop="14dp"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentStart="true" />
+
+    <TextView
+        android:id="@+id/call_status"
+        android:text="@string/connecting"
+        android:padding="10dp"
+        android:textSize="23sp"
+        android:textColor="@color/white"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignBaseline="@+id/yonghuming"
+        android:layout_alignBottom="@+id/yonghuming"
+        android:layout_toEndOf="@+id/imageButton2" />
+
+    <TextView
+        android:id="@+id/yonghuming"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:padding="10dp"
+        android:textSize="23sp"
+        android:textColor="@color/white"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentEnd="true"
+        android:layout_marginTop="11dp"
+       />
+
+
+</RelativeLayout>
+
